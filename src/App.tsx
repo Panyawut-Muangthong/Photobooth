@@ -359,21 +359,41 @@ export function App() {
     });
   };
 
-  // Add sticker
-  const handleAddSticker = (emoji: string, syncToRoom = true) => {
+  // Add sticker at specific position
+  const handleAddStickerAtPos = (emoji: string, x: number, y: number, syncToRoom = true) => {
     const newSticker: StickerItem = {
-      id: `st-${Date.now()}`,
+      id: `st-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       emoji,
-      x: 20 + Math.floor(Math.random() * 60),
-      y: 15 + Math.floor(Math.random() * 70),
+      x: Math.round(x),
+      y: Math.round(y),
       scale: 1.0,
-      rotation: Math.floor(Math.random() * 30) - 15,
+      rotation: Math.floor(Math.random() * 20) - 10,
     };
     const updated = [...stickers, newSticker];
     setStickers(updated);
     if (syncToRoom && currentRoomId) {
       roomManager.broadcast('STICKER_UPDATE', { stickers: updated }, userName);
     }
+  };
+
+  // Add sticker randomly
+  const handleAddSticker = (emoji: string, syncToRoom = true) => {
+    handleAddStickerAtPos(
+      emoji,
+      20 + Math.floor(Math.random() * 60),
+      15 + Math.floor(Math.random() * 70),
+      syncToRoom
+    );
+  };
+
+  const handleUpdateSticker = (stickerId: string, updates: Partial<StickerItem>, syncToRoom = true) => {
+    setStickers((prev) => {
+      const updated = prev.map((st) => (st.id === stickerId ? { ...st, ...updates } : st));
+      if (syncToRoom && currentRoomId) {
+        roomManager.broadcast('STICKER_UPDATE', { stickers: updated }, userName);
+      }
+      return updated;
+    });
   };
 
   const handleRemoveSticker = (stickerId: string) => {
@@ -637,7 +657,9 @@ export function App() {
             onFileUpload={handleFileUpload}
             onRemovePhoto={handleRemovePhoto}
             onUpdateTransform={handleUpdateTransform}
+            onUpdateSticker={handleUpdateSticker}
             onRemoveSticker={handleRemoveSticker}
+            onAddStickerAtPos={handleAddStickerAtPos}
             isRoomConnected={isRoomConnected}
             duoMode={duoMode}
             userName={userName}

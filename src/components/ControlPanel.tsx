@@ -495,7 +495,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                   Sticker Deco Box
                 </label>
                 <p className="text-[11px] text-zinc-500 mt-0.5">
-                  Click to add stickers onto your photobooth strip
+                  Drag & drop emotes onto the photo strip or click to add
                 </p>
               </div>
               {stickers.length > 0 && (
@@ -513,20 +513,29 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               {STICKER_PALETTE.map((emoji, idx) => (
                 <button
                   key={idx}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/photobooth-emoji', emoji);
+                    e.dataTransfer.setData('text/plain', emoji);
+                    e.dataTransfer.effectAllowed = 'copy';
+                  }}
                   onClick={() => onAddSticker(emoji)}
-                  className="h-12 bg-white hover:bg-rose-50 border border-zinc-200 hover:border-rose-300 rounded-xl text-xl flex items-center justify-center transition transform hover:scale-110 active:scale-90 shadow-2xs"
-                  title={`Add ${emoji}`}
+                  className="h-12 bg-white hover:bg-rose-50 border border-zinc-200 hover:border-rose-300 rounded-xl text-xl flex items-center justify-center transition transform hover:scale-110 active:scale-90 shadow-2xs cursor-grab active:cursor-grabbing select-none"
+                  title={`Drag onto strip or click to add ${emoji}`}
                 >
                   {emoji}
                 </button>
               ))}
             </div>
 
-            {stickers.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 text-[11px] text-amber-800">
-                💡 Tip: You can drag stickers directly on the photobooth strip or hover to remove them!
-              </div>
-            )}
+            <div className="bg-rose-50/70 border border-rose-200/60 rounded-xl p-2.5 text-[11px] text-rose-800 space-y-1">
+              <p className="font-semibold">✨ Emote Drag & Drop Features:</p>
+              <ul className="list-disc list-inside space-y-0.5 text-rose-700 text-[10.5px]">
+                <li><strong>Drag & Drop:</strong> Grab any emote above and release it anywhere on your photo strip!</li>
+                <li><strong>Reposition:</strong> Drag placed emotes around the strip at any time.</li>
+                <li><strong>Resize / Rotate:</strong> Click any placed emote to resize (+ / -), rotate, or delete (✕).</li>
+              </ul>
+            </div>
           </div>
         )}
       </div>

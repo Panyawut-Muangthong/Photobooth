@@ -6,7 +6,10 @@ import {
   X, 
   RotateCw, 
   FlipHorizontal, 
-  Move
+  Move,
+  Trash2,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
 import { 
   FrameBorderConfig, 
@@ -19,6 +22,7 @@ import {
   TransformState 
 } from '../types/photobooth';
 import { getFilterCssString } from '../utils/filterEngine';
+import { STICKER_PALETTE } from '../constants/presets';
 
 interface PhotoboothStripProps {
   layout: LayoutConfig;
@@ -37,6 +41,7 @@ interface PhotoboothStripProps {
   onUpdateTransform: (slotId: string, transform: TransformState) => void;
   onUpdateSticker?: (stickerId: string, updates: Partial<StickerItem>) => void;
   onRemoveSticker?: (stickerId: string) => void;
+  onAddStickerAtPos?: (emoji: string, x: number, y: number) => void;
   isRoomConnected?: boolean;
   duoMode?: 'shared' | 'alternating';
   userName?: string;
@@ -60,13 +65,27 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
   onUpdateTransform,
   onUpdateSticker,
   onRemoveSticker,
+  onAddStickerAtPos,
   isRoomConnected,
   duoMode,
   userName = 'You',
   partnerName = 'Partner',
 }) => {
+  const stripRef = useRef<HTMLDivElement>(null);
   const [draggingSlotId, setDraggingSlotId] = useState<string | null>(null);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
+  const [isDragOverStrip, setIsDragOverStrip] = useState(false);
+  
+  // Sticker dragging state
+  const [draggingStickerId, setDraggingStickerId] = useState<string | null>(null);
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null);
+  const stickerDragStartRef = useRef<{ startClientX: number; startClientY: number; initX: number; initY: number }>({
+    startClientX: 0,
+    startClientY: 0,
+    initX: 0,
+    initY: 0,
+  });
+
   const dragStartRef = useRef<{ startX: number; startY: number; initX: number; initY: number }>({
     startX: 0,
     startY: 0,
@@ -74,16 +93,14 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
     initY: 0,
   });
 
-  // Calculate container aspect ratio and width
   const isPolaroid = layout.id === 'polaroid-single';
   const isSquareCollage = layout.id === 'square-2x2';
 
-  // Base preview width
   let baseWidth = 360;
   if (isSquareCollage) baseWidth = 420;
   if (isPolaroid) baseWidth = 340;
 
-  // Direct Inline Drag Pan handler
+  // Direct Inline Drag Pan handler for Photo Slots
   const handlePointerDownInline = (
     e: React.PointerEvent, 
     slot: PhotoSlotData, 
@@ -147,9 +164,10 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
     });
   };
 
-  // Drag and drop image files from desktop directly onto a slot
+  // Drag and drop image files directly onto a specific slot
   const handleSlotDrop = (e: React.DragEvent, slotId: string) => {
     e.preventDefault();
+    e.stopPropagation();
     setDragOverSlotId(null);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const file = e.dataTransfer.files[0];
@@ -159,11 +177,82 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
     }
   };
 
+  // Drag and drop emoji stickers from palette onto strip
+  const handleStripDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOverStrip(true);
+  };
+
+  const handleStripDragLeave = () => {
+    setIsDragOverStrip(false);
+  };
+
+  const handleStripDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOverStrip(false);
+    
+    // Check if an emoji is being dropped
+    const emoji = e.dataTransfer.getData('application/photobooth-emoji') || e.dataTransfer.getData('text/plain');
+    if (emoji && (STICKER_PALETTE.includes(emoji) || emoji.length <= 4)) {
+      if (!stripRef.current) return;
+      const rect = stripRef.current.getBoundingClientRect();
+      const x = Math.max(5, Math.min(95, ((e.clientX - rect.left) / rect.width) * 100));
+      const y = Math.max(5, Math.min(95, ((e.clientY - rect.top) / rect.height) * 100));
+      onAddStickerAtPos?.(emoji, x, y);
+    }
+  };
+
+  // Drag existing sticker on the strip
+  const handleStickerPointerDown = (e: React.PointerEvent, st: StickerItem) => {
+    e.stopPropagation();
+    setSelectedStickerId(st.id);
+    setDraggingStickerId(st.id);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+    stickerDragStartRef.current = {
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      initX: st.x,
+      initY: st.y,
+    };
+  };
+
+  const handleStickerPointerMove = (e: React.PointerEvent, st: StickerItem) => {
+    if (draggingStickerId !== st.id || !stripRef.current) return;
+    const rect = stripRef.current.getBoundingClientRect();
+    const deltaXPercent = ((e.clientX - stickerDragStartRef.current.startClientX) / rect.width) * 100;
+    const deltaYPercent = ((e.clientY - stickerDragStartRef.current.startClientY) / rect.height) * 100;
+
+    const newX = Math.max(3, Math.min(97, stickerDragStartRef.current.initX + deltaXPercent));
+    const newY = Math.max(3, Math.min(97, stickerDragStartRef.current.initY + deltaYPercent));
+
+    onUpdateSticker?.(st.id, { x: newX, y: newY });
+  };
+
+  const handleStickerPointerUp = (e: React.PointerEvent) => {
+    if (draggingStickerId) {
+      setDraggingStickerId(null);
+      try {
+        (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+      } catch {
+        // Safe catch
+      }
+    }
+  };
+
   return (
-    <div className="relative flex justify-center items-center py-6 px-2 select-none">
+    <div 
+      className="relative flex justify-center items-center py-6 px-2 select-none"
+      onClick={() => setSelectedStickerId(null)}
+    >
       {/* Physical Strip Container */}
       <div
+        ref={stripRef}
         id="photobooth-preview-strip"
+        onDragOver={handleStripDragOver}
+        onDragLeave={handleStripDragLeave}
+        onDrop={handleStripDrop}
         style={{
           width: `${baseWidth}px`,
           backgroundColor: borderConfig.customColor || borderConfig.color,
@@ -171,6 +260,8 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
           gap: `${borderConfig.gap}px`,
         }}
         className={`relative rounded-2xl shadow-strip transition-all duration-200 border border-black/5 ${
+          isDragOverStrip ? 'ring-4 ring-rose-400/80 scale-[1.01]' : ''
+        } ${
           borderConfig.texture === 'grain' ? 'bg-film-grain' : 
           borderConfig.texture === 'matte' ? 'bg-paper-texture' : ''
         }`}
@@ -237,8 +328,8 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
                     </div>
 
                     {/* Badge showing slot index and duo turn */}
-                    <div className="absolute top-2 left-2 pointer-events-none flex items-center space-x-1 z-10">
-                      <span className="bg-black/50 backdrop-blur-sm text-white/90 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
+                    <div className="absolute top-2 left-2 pointer-events-none flex items-center space-x-1 z-20">
+                      <span className="bg-black/60 backdrop-blur-sm text-white/95 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
                         #{index + 1}
                       </span>
                       {isRoomConnected && duoMode === 'alternating' && (
@@ -250,20 +341,40 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
                       )}
                     </div>
 
+                    {/* DIRECT TOP-RIGHT DELETE BUTTON (Always works & easy to click) */}
+                    <button
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemovePhoto(slot.id);
+                      }}
+                      className="absolute top-2 right-2 z-30 p-1.5 bg-red-500/90 hover:bg-red-600 active:scale-90 text-white rounded-full shadow-md transition cursor-pointer"
+                      title="Delete / Remove this photo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+
                     {/* Quick Hover Controls Overlay */}
-                    <div className="absolute inset-0 bg-black/30 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1.5 p-2">
+                    <div 
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className={`absolute inset-0 bg-black/35 backdrop-blur-[1px] ${
+                        isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      } transition-opacity flex items-center justify-center gap-2 p-2 z-20`}
+                    >
                       <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenAdjustment(slot.id);
                         }}
-                        className="p-2 bg-white/90 hover:bg-white text-zinc-800 rounded-xl shadow-md transition transform hover:scale-105 active:scale-95"
+                        className="p-2.5 bg-white hover:bg-zinc-100 text-zinc-800 rounded-xl shadow-md transition transform hover:scale-110 active:scale-95 cursor-pointer"
                         title="Open Adjustment Editor"
                       >
                         <Sliders className="w-4 h-4" />
                       </button>
 
                       <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           onUpdateTransform(slot.id, {
@@ -271,13 +382,14 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
                             rotation: (slot.transform.rotation + 90) % 360,
                           });
                         }}
-                        className="p-2 bg-white/90 hover:bg-white text-zinc-800 rounded-xl shadow-md transition transform hover:scale-105 active:scale-95"
+                        className="p-2.5 bg-white hover:bg-zinc-100 text-zinc-800 rounded-xl shadow-md transition transform hover:scale-110 active:scale-95 cursor-pointer"
                         title="Rotate 90°"
                       >
                         <RotateCw className="w-4 h-4" />
                       </button>
 
                       <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           onUpdateTransform(slot.id, {
@@ -285,29 +397,30 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
                             flipH: !slot.transform.flipH,
                           });
                         }}
-                        className="p-2 bg-white/90 hover:bg-white text-zinc-800 rounded-xl shadow-md transition transform hover:scale-105 active:scale-95"
+                        className="p-2.5 bg-white hover:bg-zinc-100 text-zinc-800 rounded-xl shadow-md transition transform hover:scale-110 active:scale-95 cursor-pointer"
                         title="Mirror Flip"
                       >
                         <FlipHorizontal className="w-4 h-4" />
                       </button>
 
                       <button
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => {
                           e.stopPropagation();
                           onRemovePhoto(slot.id);
                         }}
-                        className="p-2 bg-red-500/90 hover:bg-red-600 text-white rounded-xl shadow-md transition transform hover:scale-105 active:scale-95"
+                        className="p-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white rounded-xl shadow-md transition transform hover:scale-110 cursor-pointer"
                         title="Delete Photo"
                       >
-                        <X className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
 
                     {/* Bottom gesture hint on hover */}
-                    <div className="absolute bottom-1.5 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-90 transition-opacity">
+                    <div className="absolute bottom-1.5 inset-x-0 flex justify-center pointer-events-none opacity-0 group-hover:opacity-90 transition-opacity z-20">
                       <span className="bg-black/60 backdrop-blur-sm text-white text-[9px] px-2 py-0.5 rounded-full flex items-center space-x-1">
                         <Move className="w-2.5 h-2.5 text-rose-300" />
-                        <span>Drag / Scroll to Zoom</span>
+                        <span>Drag to Pan • Scroll to Zoom</span>
                       </span>
                     </div>
                   </div>
@@ -398,34 +511,95 @@ export const PhotoboothStrip: React.FC<PhotoboothStripProps> = ({
           )}
         </div>
 
-        {/* Interactive Sticker Badges */}
-        {stickers.map((st) => (
-          <div
-            key={st.id}
-            style={{
-              position: 'absolute',
-              left: `${st.x}%`,
-              top: `${st.y}%`,
-              transform: `translate(-50%, -50%) rotate(${st.rotation}deg) scale(${st.scale})`,
-              fontSize: '26px',
-            }}
-            className="cursor-move select-none group/sticker z-20 hover:scale-125 transition-transform"
-            title="Click to remove or reposition sticker"
-          >
-            <span>{st.emoji}</span>
-            {onRemoveSticker && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveSticker(st.id);
-                }}
-                className="absolute -top-1 -right-1 hidden group-hover/sticker:flex w-4 h-4 bg-red-500 text-white rounded-full items-center justify-center text-[9px] shadow"
+        {/* DRAGGABLE & DROP EMOTE STICKERS */}
+        {stickers.map((st) => {
+          const isSelected = selectedStickerId === st.id;
+          return (
+            <div
+              key={st.id}
+              onPointerDown={(e) => handleStickerPointerDown(e, st)}
+              onPointerMove={(e) => handleStickerPointerMove(e, st)}
+              onPointerUp={handleStickerPointerUp}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSelectedStickerId(st.id);
+              }}
+              style={{
+                position: 'absolute',
+                left: `${st.x}%`,
+                top: `${st.y}%`,
+                transform: `translate(-50%, -50%) rotate(${st.rotation}deg) scale(${st.scale})`,
+                fontSize: '28px',
+              }}
+              className={`cursor-grab active:cursor-grabbing select-none group/sticker z-30 touch-none transition-transform ${
+                isSelected ? 'ring-2 ring-rose-400 rounded-xl p-1 bg-white/40 backdrop-blur-xs' : ''
+              }`}
+              title="Drag to reposition sticker anywhere"
+            >
+              <span>{st.emoji}</span>
+
+              {/* Floating controls when sticker is selected or hovered */}
+              <div 
+                onPointerDown={(e) => e.stopPropagation()}
+                className={`absolute -top-7 left-1/2 -translate-x-1/2 flex items-center space-x-1 bg-black/80 backdrop-blur-sm px-1.5 py-0.5 rounded-full z-40 transition-opacity ${
+                  isSelected ? 'opacity-100' : 'opacity-0 group-hover/sticker:opacity-100'
+                }`}
               >
-                ✕
-              </button>
-            )}
-          </div>
-        ))}
+                {/* Scale Down */}
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdateSticker?.(st.id, { scale: Math.max(0.6, st.scale - 0.2) });
+                  }}
+                  className="w-4 h-4 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-[10px]"
+                  title="Make smaller"
+                >
+                  -
+                </button>
+
+                {/* Scale Up */}
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdateSticker?.(st.id, { scale: Math.min(2.5, st.scale + 0.2) });
+                  }}
+                  className="w-4 h-4 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-[10px]"
+                  title="Make larger"
+                >
+                  +
+                </button>
+
+                {/* Rotate 15 deg */}
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onUpdateSticker?.(st.id, { rotation: (st.rotation + 15) % 360 });
+                  }}
+                  className="w-4 h-4 rounded-full bg-white/20 hover:bg-white/40 text-white flex items-center justify-center text-[9px]"
+                  title="Rotate sticker"
+                >
+                  ⟳
+                </button>
+
+                {/* Delete */}
+                <button
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveSticker?.(st.id);
+                  }}
+                  className="w-4 h-4 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center text-[9px]"
+                  title="Delete sticker"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
